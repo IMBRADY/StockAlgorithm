@@ -15,7 +15,7 @@ from io import StringIO
 with open("keys.txt") as f: #Everything under with open umbrella will happen while file is being read, then closed after
     API_KEY = f.readline().strip()
     SECRET_KEY = f.readline().strip()  
-f = open("log.txt", "a")
+f = open("log.txt", "a", buffering=1) # bufferings lets log refresh every line instead of all at once (prevents accidental crash not saving log)
 
 trading_client = TradingClient(API_KEY, SECRET_KEY, paper=True) #places orders/checks account
 historical_client = StockHistoricalDataClient(API_KEY, SECRET_KEY) #downloads stock prices and market data
@@ -67,9 +67,12 @@ else:
 
 print("--- Trading ---")
 f.write(f"[{datetime.now(timezone.utc)}] [main/INFO]: Beginning Trading\n")
+f.flush()
 macds = {}
 recent_bar = None
 clock = trading_client.get_clock()
+cooldown_until = {ticker: None}
+COOLDOWN_BARS = 5 # stops bot from constantly reentering and selling if conditions met
 try: # when keyboard interruption, process loop first
     while True: 
         try: # catch general errors without killing whole bot
@@ -125,15 +128,22 @@ try: # when keyboard interruption, process loop first
             "current_signal": current_signal,
             "previous_signal": previous_signal }
             current_price = new_data["close"]
-            f.write(f"[{datetime.now(timezone.utc)}] [main/INFO]: Beginning Trading\n")
+
+            #Rolling Vol Calculation
+            rolling_avg_vol = dataFrame[ticker]["volume"].tail(20).mean()
+            current_vol = new_data["volume"]
+            volume_confirmed = current_vol > rolling_avg_vol * 1.2 
+
+            #Cooldown Check
+            in_cooldown = cooldown_until[ticker] is not None and bar_time < cooldown_until[ticker]
 
             print("EMA30:", ema30.iloc[-1], "Current MACD:", current_macd, "Current Price:", current_price, "Current Equity:", equity)
-            print(dataFrame[ticker].tail())
+            f.write(f"[{datetime.now(timezone.utc)}] [main/INFO]: EMA30: {ema30.iloc[-1]}, Current MACD: {current_macd}, Current Price: {current_price}, Current Equity: {equity}\n")
             print("Local:", datetime.now())
             print("Bar time:", bars.index[-1])
 
             #MACD Buy
-            if current_macd > current_signal and (current_macd-previous_macd) > 0 and new_data["close"] > ema30.iloc[-1] and not positions[ticker]:
+            if current_macd > current_signal and (current_macd-previous_macd) > 0 and new_data["close"] > ema30.iloc[-1] and volume_confirmed and not in_cooldown and not positions[ticker]:
                 shares = round(risk_per_trade/(current_price*0.02), 6)
                 print("BUY SIGNAL: ", ticker)
                 order = MarketOrderRequest(
@@ -147,7 +157,7 @@ try: # when keyboard interruption, process loop first
                 positions[ticker] = True
                 entry_prices[ticker] = current_price
                 highest_prices[ticker] = entry_prices[ticker]
-                f.write(f"[{datetime.now(timezone.utc)}] [main/INFO]: Beginning Trading\n")
+                f.write(f"[{datetime.now(timezone.utc)}] [main/BUY]: MACD Buy, At price: {current_price}\n")
             
             #Stop Loss (Trailing Stop)
             if positions[ticker]:
@@ -164,7 +174,8 @@ try: # when keyboard interruption, process loop first
                     trading_client.submit_order(order)
                     print("ORDER SENT")
                     positions[ticker] = False
-                    f.write(f"[{datetime.now(timezone.utc)}] [main/INFO]: Beginning Trading\n")
+                    cooldown_until[ticker] = bar_time + timedelta(minutes=COOLDOWN_BARS)
+                    f.write(f"[{datetime.now(timezone.utc)}] [main/SELL]: Stop Loss, At price: {current_price}\n")
                     continue 
                 #Take Profit
                 if current_price > entry_prices.get(ticker, 0)*1.04:
@@ -179,7 +190,8 @@ try: # when keyboard interruption, process loop first
                     trading_client.submit_order(order)
                     print("ORDER SENT")
                     positions[ticker] = False
-                    f.write(f"[{datetime.now(timezone.utc)}] [main/INFO]: Beginning Trading\n")
+                    cooldown_until[ticker] = bar_time + timedelta(minutes=COOLDOWN_BARS)
+                    f.write(f"[{datetime.now(timezone.utc)}] [main/SELL]: Take Profit, At price: {current_price}\n")
                     continue
                 #MACD Sell
                 if previous_macd > previous_signal and current_macd < current_signal:
@@ -194,7 +206,8 @@ try: # when keyboard interruption, process loop first
                     trading_client.submit_order(order)
                     print("ORDER SENT")
                     positions[ticker] = False
-                    f.write(f"[{datetime.now(timezone.utc)}] [main/INFO]: Beginning Trading\n")
+                    cooldown_until[ticker] = bar_time + timedelta(minutes=COOLDOWN_BARS)
+                    f.write(f"[{datetime.now(timezone.utc)}] [main/SELL]: MACD Sell, At price: {current_price}\n")
             
             dataFrame[ticker] = dataFrame[ticker].tail(100)
         except KeyboardInterrupt:
