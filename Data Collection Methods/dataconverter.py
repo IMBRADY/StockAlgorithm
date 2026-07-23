@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import sqlite3
 
 
-df = pd.read_csv("logs/2026-07-17/WDAY.csv")
+df = pd.read_csv("logs/2026-07-20/WDAY.csv")
 
 # Creates window named fig, with two axes named ax1 and ax2
 # 2 rows, 1 col, we choose 12x8in window on same x axis
