@@ -13,10 +13,10 @@ import os
 import pandas as pd
 from io import StringIO
 
-with open("../keys.txt") as f:
+with open("keys.txt") as f:
     API_KEY = f.readline().strip()
     SECRET_KEY = f.readline().strip()
-f = open("../log_rsi.txt", "a", buffering=1)
+f = open("log_rsi.txt", "a", buffering=1)
 
 log_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 log_folder = f"logs_rsi/{log_date}"
@@ -125,15 +125,8 @@ def build_watchlist(historical_client, top_n=7):
             continue
         if not (10 <= r["avg_price"] <= 300):
             continue
-        # For mean-reversion, extremely low ATR names are fine too --
-        # RSI reversals still fire on calmer names. Keep the same band
-        # as the MACD bot for now so the two are comparable.
         if not (0.02 <= r["atr_pct"] <= 0.05):
             continue
-        # NOTE: we deliberately do NOT require r["ma"] <= r["last_close"] here.
-        # The MACD bot filters for uptrending names because it's a momentum
-        # strategy. RSI mean-reversion wants to buy dips, so a name sitting
-        # slightly below its 50-day MA isn't disqualifying the same way.
         results.append(r)
     results.sort(key=lambda x: x["trend"], reverse=True)
     return results[:top_n]
@@ -142,8 +135,7 @@ def compute_rsi(close_series, period=RSI_PERIOD):
     delta = close_series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    # Wilder's smoothing (standard RSI), equivalent to an EWM with alpha=1/period
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean() # Wilder's smoothing (standard RSI), equivalent to an EWM with alpha=1/period
     avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
     rs = avg_gain / avg_loss.replace(0, 1e-10)
     rsi = 100 - (100 / (1 + rs))
@@ -294,6 +286,7 @@ try:
                             continue
  
                         # Fixed take-profit backstop
+
                         if current_price > entry_prices.get(ticker, 0) * (1 + TAKE_PROFIT_PCT):
                             action = True
                             position = trading_client.get_open_position(ticker)
@@ -311,6 +304,7 @@ try:
                             continue
  
                         # RSI SELL: leading exit signal -- overbought reached
+
                         if current_rsi >= RSI_OVERBOUGHT:
                             action = True
                             position = trading_client.get_open_position(ticker)
