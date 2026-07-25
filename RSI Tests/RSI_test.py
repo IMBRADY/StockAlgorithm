@@ -16,7 +16,6 @@ from io import StringIO
 with open("keys.txt") as f:
     API_KEY = f.readline().strip()
     SECRET_KEY = f.readline().strip()
-f = open("log_rsi.txt", "a", buffering=1)
 
 log_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 log_folder = f"logs_rsi/{log_date}"
